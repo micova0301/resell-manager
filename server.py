@@ -429,38 +429,6 @@ function findProductName(text){
         .slice(0, 2)
         .join(" ");
 }
-
-    // 한글이 포함된 상품명을 우선
-    const koreanLines =
-        candidates.filter(
-            x => /[가-힣]/.test(x)
-        );
-
-    if(koreanLines.length >= 2){
-
-        const first =
-            candidates.find(
-                x => /[가-힣]/.test(x)
-            );
-
-        const second =
-            koreanLines.find(
-                x => x !== first
-            );
-
-        return second
-            ? first + " " + second
-            : first;
-    }
-
-    if(koreanLines.length === 1){
-        return koreanLines[0];
-    }
-
-    return candidates
-        .slice(0, 2)
-        .join(" ");
-}
 async function fileToJpeg(file){
 
     const bitmap = await createImageBitmap(file);
