@@ -435,32 +435,46 @@ async function fileToJpeg(file){
 
     const canvas = document.createElement("canvas");
 
-    const maxWidth = 1600;
+    const scale = 2;
 
-    let width = bitmap.width;
-    let height = bitmap.height;
-
-    if(width > maxWidth){
-        height = Math.round(height * maxWidth / width);
-        width = maxWidth;
-    }
-
-    canvas.width = width;
-    canvas.height = height;
+    canvas.width = bitmap.width * scale;
+    canvas.height = bitmap.height * scale;
 
     const ctx = canvas.getContext("2d");
 
-    ctx.drawImage(bitmap, 0, 0, width, height);
+    ctx.drawImage(
+        bitmap,
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
 
-    return await new Promise(resolve => {
-
-        canvas.toBlob(
-            blob => resolve(blob),
-            "image/jpeg",
-            0.9
+    const imageData =
+        ctx.getImageData(
+            0,
+            0,
+            canvas.width,
+            canvas.height
         );
 
-    });
+    const data = imageData.data;
+
+    for(let i = 0; i < data.length; i += 4){
+
+        const gray =
+            0.299 * data[i] +
+            0.587 * data[i + 1] +
+            0.114 * data[i + 2];
+
+        data[i] = gray;
+        data[i + 1] = gray;
+        data[i + 2] = gray;
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+
+    return canvas;
 }
 ocrButton.onclick = async function(){
 
@@ -480,7 +494,7 @@ ocrButton.onclick = async function(){
 
         const result =
             await Tesseract.recognize(
-                selectedFile,
+                await fileToJpeg(selectedFile),
                 "kor+eng",
                 {
                     logger: function(message){
