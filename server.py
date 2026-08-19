@@ -384,7 +384,39 @@ function findProductName(text){
 
     return "";
 }
+async function fileToJpeg(file){
 
+    const bitmap = await createImageBitmap(file);
+
+    const canvas = document.createElement("canvas");
+
+    const maxWidth = 1600;
+
+    let width = bitmap.width;
+    let height = bitmap.height;
+
+    if(width > maxWidth){
+        height = Math.round(height * maxWidth / width);
+        width = maxWidth;
+    }
+
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext("2d");
+
+    ctx.drawImage(bitmap, 0, 0, width, height);
+
+    return await new Promise(resolve => {
+
+        canvas.toBlob(
+            blob => resolve(blob),
+            "image/jpeg",
+            0.9
+        );
+
+    });
+}
 ocrButton.onclick = async function(){
 
     if(!selectedFile){
