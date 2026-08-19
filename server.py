@@ -368,35 +368,98 @@ function findDiscount(text){
 
 function findProductName(text){
 
-    const lines =
-        text
+    const lines = text
         .split(/\n/)
         .map(x => x.trim())
         .filter(x => x.length >= 2);
 
-    for(let i=0;i<lines.length;i++){
+    const idx = lines.findIndex(
+        x => /^\d{6}$/.test(x)
+    );
 
-        if(/^\d{6}$/.test(lines[i])){
-
-            for(
-                let j=i+1;
-                j<Math.min(i+5,lines.length);
-                j++
-            ){
-
-                const candidate = lines[j];
-
-                if(
-                    candidate.length >= 2 &&
-                    !/원|할인|행사|20\d{2}|^\d+$/.test(candidate)
-                ){
-                    return candidate;
-                }
-            }
-        }
+    if(idx === -1){
+        return "";
     }
 
-    return "";
+    const candidates = [];
+
+    for(let i = idx + 1; i < Math.min(idx + 8, lines.length); i++){
+
+        const line = lines[i];
+
+        // 가격, 날짜, 할인금액 등은 제외
+        if(
+            /원|할인|행사|20\d{2}|^\d+$|^\d+[,.]\d+$/
+                .test(line)
+        ){
+            continue;
+        }
+
+        candidates.push(line);
+    }
+
+    // 한글이 포함된 상품명을 우선
+    const koreanLines =
+        candidates.filter(
+            x => /[가-힣]/.test(x)
+        );
+
+    if(koreanLines.length >= 2){
+
+        const first =
+            candidates.find(
+                x => /[가-힣]/.test(x)
+            );
+
+        const second =
+            koreanLines.find(
+                x => x !== first
+            );
+
+        return second
+            ? first + " " + second
+            : first;
+    }
+
+    if(koreanLines.length === 1){
+        return koreanLines[0];
+    }
+
+    return candidates
+        .slice(0, 2)
+        .join(" ");
+}
+
+    // 한글이 포함된 상품명을 우선
+    const koreanLines =
+        candidates.filter(
+            x => /[가-힣]/.test(x)
+        );
+
+    if(koreanLines.length >= 2){
+
+        const first =
+            candidates.find(
+                x => /[가-힣]/.test(x)
+            );
+
+        const second =
+            koreanLines.find(
+                x => x !== first
+            );
+
+        return second
+            ? first + " " + second
+            : first;
+    }
+
+    if(koreanLines.length === 1){
+        return koreanLines[0];
+    }
+
+    return candidates
+        .slice(0, 2)
+        .join(" ");
 }
 async function fileToJpeg(file){
 
@@ -483,64 +546,71 @@ ocrButton.onclick = async function(){
         const number =
             findProductNumber(text);
 
-        const name =
-            findProductName(text);
+const name = findProductName(text);
 
-        const prices =
-            findPrices(text);
+const dates = findDates(text);
 
-        const dates =
-            findDates(text);
+const discountAmount = findDiscount(text);
 
-        const discountAmount =
-            findDiscount(text);
+/* 가격표 전용 가격 추출 */
 
-        productNumber.value = number;
+const normalizedText =
+    text
+        .replace(/(\d{1,3})[,.]\s*\n?\s*(\d{3})/g, "$1,$2")
+        .replace(/\n/g, " ");
 
-        productName.value = name;
+const priceMatches =
+    [...normalizedText.matchAll(/\d{1,3}(?:[,.]\d{3})+/g)];
 
-        /*
-         가격이 여러 개 발견되면
-         가장 큰 가격 = 정상가
-         가장 작은 가격 = 현재 판매가
-        */
+const prices = [];
 
-        if(prices.length >= 2){
+for(const match of priceMatches){
 
-            const maxPrice =
-                Math.max(...prices);
+    const number = Number(
+        match[0].replace(/,/g, "")
+    );
 
-            const minPrice =
-                Math.min(...prices);
+    const before =
+        normalizedText.slice(
+            Math.max(0, match.index - 3),
+            match.index
+        );
 
-            regularPrice.value =
-                maxPrice;
+    // 할인금액(-6,000원)은 제외
+    if(/-\s*$/.test(before)){
+        continue;
+    }
 
-            salePrice.value =
-                minPrice;
+    if(
+        number >= 1000 &&
+        number <= 10000000 &&
+        !prices.includes(number)
+    ){
+        prices.push(number);
+    }
+}
 
-            if(discountAmount){
-                discount.value =
-                    discountAmount;
-            }
+prices.sort((a,b) => b-a);
 
-        }
+productNumber.value = number;
+productName.value = name;
 
-        /*
-         가격이 하나뿐이면
-         세일 없는 일반 상품으로 처리
-        */
+if(prices.length >= 2){
 
-        else if(prices.length === 1){
+    regularPrice.value = prices[0];
+    salePrice.value = prices[1];
 
-            regularPrice.value =
-                prices[0];
+    if(discountAmount){
+        discount.value = discountAmount;
+    }
 
-            salePrice.value =
-                prices[0];
+}else if(prices.length === 1){
 
-            discount.value = "";
-        }
+    regularPrice.value = prices[0];
+    salePrice.value = prices[0];
+    discount.value = "";
+
+}
 
         /*
          세일기간이 있는 경우만 날짜 입력
