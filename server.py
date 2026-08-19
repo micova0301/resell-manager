@@ -480,7 +480,7 @@ ocrButton.onclick = async function(){
 
         const result =
             await Tesseract.recognize(
-                await fileToJpeg(selectedFile),
+                selectedFile,
                 "kor+eng",
                 {
                     logger: function(message){
