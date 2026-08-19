@@ -1,29 +1,623 @@
-import os, json
-from flask import Flask, request, jsonify, Response
-from openai import OpenAI
+from flask import Flask, Response
 
 app = Flask(__name__)
-client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
-HTML = r'''<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>리셀 매니저 AI</title>
-<style>body{font-family:system-ui,sans-serif;background:#f5f6f8;margin:0}.w{max-width:720px;margin:auto;padding:16px}.c{background:#fff;border-radius:16px;padding:16px;margin:12px 0;box-shadow:0 2px 12px #0001}button,input{font-size:16px}button{padding:13px;border:1px solid #ddd;border-radius:10px;background:#fff;font-weight:800}.g{display:grid;grid-template-columns:1fr 1fr;gap:8px}.p{width:100%;background:#111;color:#fff;border:0;margin-top:12px}img{max-width:100%;max-height:300px;object-fit:contain}.prev{display:none;margin-top:10px}label{display:block;font-size:13px;font-weight:700;margin:12px 0 6px}input{width:100%;box-sizing:border-box;padding:11px;border:1px solid #ddd;border-radius:10px}.s{background:#f1f3f5;padding:11px;border-radius:10px;margin-top:10px}.big{font-size:28px;font-weight:900}.r{display:flex;justify-content:space-between;margin:7px 0}</style>
-<div class=w><h1>리셀 매니저 AI</h1><div class=c><div class=g><button onclick="cam.click()">📷 가격표 촬영</button><button onclick="gal.click()">🖼️ 사진 불러오기</button></div><input id=cam type=file accept="image/*" capture=environment hidden><input id=gal type=file accept="image/*" hidden><div class=prev id=pr><img id=im></div><button class="p" onclick=go()>⚡ AI로 바로 읽기</button><div class=s id=st>가격표 사진을 선택하세요.</div><label>상품번호</label><input id=no><label>상품명</label><input id=nm><label>정상가</label><input id=rp type=number><label>할인금액</label><input id=dc type=number><label>현재 판매가</label><input id=sp type=number><label>세일 시작일</label><input id=sd type=date><label>세일 종료일</label><input id=ed type=date><button class=p onclick=calc()>💰 권장 쿠팡 판매가 계산</button><div id=res></div></div></div>
-<script>let f=null;[cam,gal].forEach(x=>x.onchange=()=>{f=x.files[0];if(f){im.src=URL.createObjectURL(f);pr.style.display='block';st.textContent='사진 준비 완료.'}});async function go(){if(!f)return alert('가격표 사진을 선택하세요.');st.textContent='AI가 읽는 중…';let q=await new Promise(ok=>{let r=new FileReader;r.onload=()=>ok(r.result);r.readAsDataURL(f)});try{let a=await fetch('/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:q})});let x=await a.json();if(!a.ok)throw Error(x.error||'분석 실패');no.value=x.product_number||'';nm.value=x.product_name||'';rp.value=x.regular_price??'';dc.value=x.sale_discount??'';sp.value=x.sale_price??'';sd.value=x.sale_start||'';ed.value=x.sale_end||'';st.textContent='완료!'}catch(e){st.textContent='오류: '+e.message}}function calc(){let c=+sp.value;if(!c)return alert('현재 판매가를 입력하세요.');let s=(c+2200)/.79,fee=s*.11,p=s-fee-2200-c;res.innerHTML='<div class=c><div>권장 쿠팡 판매가</div><div class=big>'+Math.round(s).toLocaleString()+'원</div><div class=r><span>원가</span><b>'+c.toLocaleString()+'원</b></div><div class=r><span>수수료 11%</span><b>'+Math.round(fee).toLocaleString()+'원</b></div><div class=r><span>배송·포장</span><b>2,200원</b></div><div class=r><span>예상 순이익</span><b>'+Math.round(p).toLocaleString()+'원</b></div></div>'}</script>'''
+HTML = r'''<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<title>리셀 매니저 AI</title>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+<style>
+body{
+    font-family:system-ui,sans-serif;
+    background:#f5f6f8;
+    margin:0;
+}
+
+.w{
+    max-width:720px;
+    margin:auto;
+    padding:16px;
+}
+
+h1{
+    font-size:32px;
+}
+
+.c{
+    background:white;
+    border-radius:16px;
+    padding:16px;
+    margin:12px 0;
+    box-shadow:0 2px 12px #0001;
+}
+
+.g{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+}
+
+button{
+    font-size:17px;
+    padding:14px;
+    border-radius:12px;
+    border:1px solid #ddd;
+    background:white;
+    font-weight:800;
+}
+
+.main{
+    width:100%;
+    margin-top:12px;
+    background:#111;
+    color:white;
+    border:0;
+}
+
+.preview{
+    display:none;
+    margin-top:12px;
+}
+
+.preview img{
+    width:100%;
+    max-height:380px;
+    object-fit:contain;
+    border-radius:12px;
+}
+
+.status{
+    background:#f1f3f5;
+    padding:12px;
+    border-radius:10px;
+    margin-top:12px;
+}
+
+label{
+    display:block;
+    font-size:14px;
+    font-weight:700;
+    margin-top:14px;
+    margin-bottom:6px;
+}
+
+input{
+    width:100%;
+    box-sizing:border-box;
+    padding:12px;
+    border:1px solid #ddd;
+    border-radius:10px;
+    font-size:17px;
+}
+
+.result{
+    margin-top:15px;
+    padding:15px;
+    background:#f1f3f5;
+    border-radius:12px;
+}
+
+.big{
+    font-size:30px;
+    font-weight:900;
+}
+
+.row{
+    display:flex;
+    justify-content:space-between;
+    margin:8px 0;
+}
+
+.raw{
+    display:none;
+    white-space:pre-wrap;
+    background:#eee;
+    padding:12px;
+    border-radius:10px;
+    font-size:13px;
+    margin-top:12px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="w">
+
+<h1>리셀 매니저 AI</h1>
+
+<div class="c">
+
+<div class="g">
+
+<button id="cameraBtn">📷 가격표 촬영</button>
+
+<button id="galleryBtn">🖼️ 사진 불러오기</button>
+
+</div>
+
+<input
+    id="cameraInput"
+    type="file"
+    accept="image/*"
+    capture="environment"
+    hidden
+>
+
+<input
+    id="galleryInput"
+    type="file"
+    accept="image/*"
+    hidden
+>
+
+<div class="preview" id="preview">
+    <img id="previewImage">
+</div>
+
+<button class="main" id="ocrButton">
+    ⚡ 빠른 OCR로 읽기
+</button>
+
+<div class="status" id="status">
+    가격표 사진을 선택하세요.
+</div>
+
+<label>상품번호</label>
+<input id="productNumber">
+
+<label>상품명</label>
+<input id="productName">
+
+<label>정상가</label>
+<input id="regularPrice" type="number">
+
+<label>할인금액</label>
+<input id="discount" type="number">
+
+<label>현재 판매가</label>
+<input id="salePrice" type="number">
+
+<label>세일 시작일</label>
+<input id="saleStart" type="date">
+
+<label>세일 종료일</label>
+<input id="saleEnd" type="date">
+
+<button class="main" id="calculateButton">
+    💰 권장 판매가 계산
+</button>
+
+<div id="result"></div>
+
+<div class="raw" id="rawText"></div>
+
+</div>
+
+</div>
+
+<script>
+
+let selectedFile = null;
+
+const cameraBtn = document.getElementById("cameraBtn");
+const galleryBtn = document.getElementById("galleryBtn");
+
+const cameraInput = document.getElementById("cameraInput");
+const galleryInput = document.getElementById("galleryInput");
+
+const preview = document.getElementById("preview");
+const previewImage = document.getElementById("previewImage");
+
+const ocrButton = document.getElementById("ocrButton");
+const statusBox = document.getElementById("status");
+
+const productNumber = document.getElementById("productNumber");
+const productName = document.getElementById("productName");
+const regularPrice = document.getElementById("regularPrice");
+const discount = document.getElementById("discount");
+const salePrice = document.getElementById("salePrice");
+
+const saleStart = document.getElementById("saleStart");
+const saleEnd = document.getElementById("saleEnd");
+
+const resultBox = document.getElementById("result");
+const rawText = document.getElementById("rawText");
+
+cameraBtn.onclick = function(){
+    cameraInput.click();
+};
+
+galleryBtn.onclick = function(){
+    galleryInput.click();
+};
+
+cameraInput.onchange = function(){
+    handleFile(this.files[0]);
+};
+
+galleryInput.onchange = function(){
+    handleFile(this.files[0]);
+};
+
+function handleFile(file){
+
+    if(!file){
+        return;
+    }
+
+    selectedFile = file;
+
+    previewImage.src = URL.createObjectURL(file);
+
+    preview.style.display = "block";
+
+    statusBox.textContent = "사진 준비 완료. OCR 버튼을 눌러주세요.";
+}
+
+function money(value){
+
+    if(!value){
+        return "";
+    }
+
+    const cleaned = String(value).replace(/[^\d]/g,"");
+
+    if(!cleaned){
+        return "";
+    }
+
+    return Number(cleaned);
+}
+
+function findPrices(text){
+
+    const prices = [];
+
+    const matches =
+        text.match(
+            /(?:₩|￦)?\s*\d{1,3}(?:[,\s]\d{3})+(?:\s*원)?/g
+        ) || [];
+
+    for(const item of matches){
+
+        const number = money(item);
+
+        if(
+            number >= 1000 &&
+            number <= 10000000 &&
+            !prices.includes(number)
+        ){
+            prices.push(number);
+        }
+    }
+
+    return prices;
+}
+
+function findProductNumber(text){
+
+    const match =
+        text.match(/(?:^|\D)(\d{6})(?:\D|$)/);
+
+    return match ? match[1] : "";
+}
+
+function findDates(text){
+
+    const result = [];
+
+    const matches =
+        text.match(
+            /20\d{2}\s*[\/.\-]\s*\d{1,2}\s*[\/.\-]\s*\d{1,2}/g
+        ) || [];
+
+    for(const item of matches){
+
+        const cleaned =
+            item
+            .replace(/\s/g,"")
+            .replace(/\./g,"-")
+            .replace(/\//g,"-");
+
+        const parts = cleaned.split("-");
+
+        if(parts.length === 3){
+
+            const date =
+                parts[0] + "-" +
+                String(parts[1]).padStart(2,"0") + "-" +
+                String(parts[2]).padStart(2,"0");
+
+            if(!result.includes(date)){
+                result.push(date);
+            }
+        }
+    }
+
+    return result;
+}
+
+function findDiscount(text){
+
+    const match =
+        text.match(/-\s*([\d,]+)\s*원?/);
+
+    return match ? money(match[1]) : "";
+}
+
+function findProductName(text){
+
+    const lines =
+        text
+        .split(/\n/)
+        .map(x => x.trim())
+        .filter(x => x.length >= 2);
+
+    for(let i=0;i<lines.length;i++){
+
+        if(/^\d{6}$/.test(lines[i])){
+
+            for(
+                let j=i+1;
+                j<Math.min(i+5,lines.length);
+                j++
+            ){
+
+                const candidate = lines[j];
+
+                if(
+                    candidate.length >= 2 &&
+                    !/원|할인|행사|20\d{2}|^\d+$/.test(candidate)
+                ){
+                    return candidate;
+                }
+            }
+        }
+    }
+
+    return "";
+}
+
+ocrButton.onclick = async function(){
+
+    if(!selectedFile){
+
+        alert("먼저 가격표 사진을 선택하세요.");
+
+        return;
+    }
+
+    ocrButton.disabled = true;
+
+    statusBox.textContent =
+        "🔍 OCR 엔진을 준비하고 있습니다...";
+
+    try{
+
+        const result =
+            await Tesseract.recognize(
+                selectedFile,
+                "kor+eng",
+                {
+                    logger: function(message){
+
+                        if(
+                            message.status ===
+                            "recognizing text"
+                        ){
+
+                            const percent =
+                                Math.round(
+                                    (message.progress || 0) * 100
+                                );
+
+                            statusBox.textContent =
+                                "🔍 가격표 읽는 중... " +
+                                percent + "%";
+                        }
+                    }
+                }
+            );
+
+        const text =
+            result.data.text || "";
+
+        rawText.style.display = "block";
+
+        rawText.textContent =
+            "OCR 원문\n\n" + text;
+
+        const number =
+            findProductNumber(text);
+
+        const name =
+            findProductName(text);
+
+        const prices =
+            findPrices(text);
+
+        const dates =
+            findDates(text);
+
+        const discountAmount =
+            findDiscount(text);
+
+        productNumber.value = number;
+
+        productName.value = name;
+
+        /*
+         가격이 여러 개 발견되면
+         가장 큰 가격 = 정상가
+         가장 작은 가격 = 현재 판매가
+        */
+
+        if(prices.length >= 2){
+
+            const maxPrice =
+                Math.max(...prices);
+
+            const minPrice =
+                Math.min(...prices);
+
+            regularPrice.value =
+                maxPrice;
+
+            salePrice.value =
+                minPrice;
+
+            if(discountAmount){
+                discount.value =
+                    discountAmount;
+            }
+
+        }
+
+        /*
+         가격이 하나뿐이면
+         세일 없는 일반 상품으로 처리
+        */
+
+        else if(prices.length === 1){
+
+            regularPrice.value =
+                prices[0];
+
+            salePrice.value =
+                prices[0];
+
+            discount.value = "";
+        }
+
+        /*
+         세일기간이 있는 경우만 날짜 입력
+        */
+
+        if(dates.length >= 2){
+
+            saleStart.value =
+                dates[0];
+
+            saleEnd.value =
+                dates[1];
+
+        }else{
+
+            saleStart.value = "";
+            saleEnd.value = "";
+        }
+
+        statusBox.textContent =
+            "✅ OCR 완료! 내용을 확인해주세요.";
+
+    }
+    catch(error){
+
+        console.error(error);
+
+        statusBox.textContent =
+            "❌ OCR 오류: " +
+            error.message;
+    }
+
+    ocrButton.disabled = false;
+};
+
+document
+.getElementById("calculateButton")
+.onclick = function(){
+
+    const cost =
+        Number(salePrice.value);
+
+    if(!cost){
+
+        alert("현재 판매가를 입력하세요.");
+
+        return;
+    }
+
+    /*
+     임시 테스트용 판매가 계산식.
+     나중에 실제 판매 채널별 수수료를
+     따로 설정할 수 있게 만들 수 있음.
+    */
+
+    const recommended =
+        (cost + 2200) / 0.79;
+
+    const fee =
+        recommended * 0.11;
+
+    const profit =
+        recommended -
+        fee -
+        2200 -
+        cost;
+
+    resultBox.innerHTML = `
+
+        <div class="result">
+
+            <div>권장 판매가</div>
+
+            <div class="big">
+                ${Math.round(recommended).toLocaleString()}원
+            </div>
+
+            <div class="row">
+                <span>매입/원가</span>
+                <b>
+                    ${cost.toLocaleString()}원
+                </b>
+            </div>
+
+            <div class="row">
+                <span>예상 수수료</span>
+                <b>
+                    ${Math.round(fee).toLocaleString()}원
+                </b>
+            </div>
+
+            <div class="row">
+                <span>배송·포장</span>
+                <b>2,200원</b>
+            </div>
+
+            <div class="row">
+                <span>예상 순이익</span>
+                <b>
+                    ${Math.round(profit).toLocaleString()}원
+                </b>
+            </div>
+
+        </div>
+    `;
+};
+
+</script>
+
+</body>
+</html>
+'''
 
 @app.get("/")
 def home():
     return Response(HTML, mimetype="text/html")
 
-@app.post("/analyze")
-def analyze():
-    try:
-        d = request.get_json()
-        prompt = """이 코스트코 가격표 사진을 읽어 JSON으로만 답하세요. 키: product_number, product_name, regular_price, sale_discount, sale_price, sale_start, sale_end, is_on_sale. 날짜는 YYYY-MM-DD. 보이지 않는 값은 null 또는 빈 문자열. 정상가, 할인금액, 할인 후 판매가를 정확히 구분하세요."""
-        r = client.responses.create(model="gpt-5.6", input=[{"role":"user","content":[{"type":"input_text","text":prompt},{"type":"input_image","image_url":d["image"]}]}])
-        text = r.output_text.replace("```json", "").replace("```", "").strip()
-        return jsonify(json.loads(text))
-    except Exception as e:
-        return jsonify(error=str(e)), 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
+    import os
+
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 5000))
+    )
