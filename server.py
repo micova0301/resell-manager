@@ -280,14 +280,28 @@ function findPrices(text){
 
     const prices = [];
 
-    const matches =
-        text.match(
-            /(?:₩|￦)?\s*\d{1,3}(?:[,\s]\d{3})+(?:\s*원)?/g
-        ) || [];
+    const pattern =
+        /(?:₩|￦)?\s*\d{1,3}(?:[,\s]\d{3})+(?:\s*원)?/g;
 
-    for(const item of matches){
+    let match;
 
-        const number = money(item);
+    while((match = pattern.exec(text)) !== null){
+
+        const start = match.index;
+
+        const before =
+            text.slice(Math.max(0, start - 5), start);
+
+        /*
+         -6,000원처럼 할인금액 앞에
+         마이너스가 붙은 숫자는 가격에서 제외
+        */
+
+        if(/-\s*$/.test(before)){
+            continue;
+        }
+
+        const number = money(match[0]);
 
         if(
             number >= 1000 &&
@@ -299,6 +313,7 @@ function findPrices(text){
     }
 
     return prices;
+}
 }
 
 function findProductNumber(text){
