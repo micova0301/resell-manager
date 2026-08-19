@@ -314,7 +314,6 @@ function findPrices(text){
 
     return prices;
 }
-}
 
 function findProductNumber(text){
 
